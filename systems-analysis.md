@@ -812,3 +812,203 @@ Data Source Changes:
 Risk: Zillow discontinues Research CSV files or changes format
 Probability: Low (stable since 2012)
 Impact:
+High (historical data unavailable)
+
+Mitigation: Archive CSV files on IPFS, create community mirror
+
+Community Dependency:
+
+Risk: If few users adopt, P2P sync ineffective
+Mitigation: App works fully in standalone mode, P2P is enhancement
+
+Maintenance Burden:
+
+Risk: Single developer overwhelmed
+Mitigation: Open-source project, encourage contributions, modular architecture for easy onboarding
+
+
+Recommendations and Improvements
+Phase 1 Enhancements (Post-MVP)
+
+Additional Metrics:
+
+Days on market (DOM) average
+Price reductions percentage
+New listings vs. delisted homes
+
+
+Predictive Analytics:
+
+Linear regression for price forecasting
+Seasonal decomposition of time series (STL)
+
+
+Comparative Analysis:
+
+Compare 90720 to neighboring ZIPs (90721, 90808)
+National market benchmarking
+
+
+Alerts System:
+
+Push notifications for significant changes (e.g., "Listings dropped 20%!")
+Customizable thresholds
+
+
+
+Phase 2 Features (Advanced)
+
+Machine Learning:
+
+Price prediction model (using historical + macroeconomic data)
+Anomaly detection for unusual market movements
+
+
+Social Features:
+
+Anonymous market sentiment sharing via IPFS pub/sub
+Community annotations on chart ("Interest rate hike here")
+
+
+API for Developers:
+
+Expose data via local REST API for third-party integrations
+Webhook support for automated trading strategies
+
+
+Advanced Visualizations:
+
+Heatmaps for ZIP code comparison
+Candlestick charts for high/low/close prices
+Volume indicators
+
+
+
+Alternative Architecture Considerations
+If IPFS Proves Too Complex:
+
+Fallback: Static site hosted on GitHub Pages + GitHub Actions for updates
+Sync: WebSocket server (free tier on Render.com) for real-time updates
+Trade-off: Centralization, but easier debugging
+
+If Scraping Becomes Unreliable:
+
+Alternative 1: Crowdsourced data (users manually submit listings)
+Alternative 2: Partner with local realtors for data feed
+Alternative 3: Monthly-only updates via Zillow CSV (abandon real-time)
+
+
+Implementation Roadmap
+Phase 0: Proof of Concept (2 weeks)
+
+ Python script to scrape Zillow, output JSON
+ Simple HTML page with Chart.js rendering data
+ Validate data accuracy against manual checks
+
+Phase 1: Desktop MVP (6 weeks)
+Week 1-2: Core Infrastructure
+
+ Set up Tauri project structure
+ Implement data fetcher (CSV download + scraping)
+ Create SQLite schema and storage module
+
+Week 3-4: UI Development
+
+ Build chart UI with Chart.js
+ Implement SMA calculations
+ Add timeframe and control panel
+
+Week 5: System Tray Integration
+
+ Create system tray icon with dynamic tooltip
+ Handle click events to show/hide chart
+
+Week 6: Testing and Polish
+
+ Write unit tests for core modules
+ User acceptance testing
+ Fix bugs and optimize performance
+
+Phase 2: IPFS Integration (4 weeks)
+Week 1-2: P2P Foundation
+
+ Integrate rust-libp2p
+ Implement pub/sub topic subscription
+ Create message protocol and serialization
+
+Week 3: Distribution Setup
+
+ Create IPFS CAR of app bundle
+ Set up Pinata pinning automation
+ Document IPFS installation process
+
+Week 4: Multi-Node Testing
+
+ Test sync between 3+ nodes
+ Implement conflict resolution
+ Stress test with simulated network failures
+
+Phase 3: Mobile Port (6 weeks)
+Week 1-2: Flutter Setup
+
+ Create Flutter project structure
+ Implement Rust FFI bindings
+ Port core data modules
+
+Week 3-4: Mobile UI
+
+ Design responsive chart layout
+ Build control panel bottom sheet
+ Create home screen widget
+
+Week 5: Background Services
+
+ Implement WorkManager for periodic updates
+ Add notification system
+ Handle Android permissions
+
+Week 6: Testing and Deployment
+
+ Device testing (various Android versions)
+ Build signed APK
+ Create installation guide
+
+Phase 4: Launch (2 weeks)
+
+ Create project website (IPFS-hosted)
+ Write comprehensive documentation
+ Publish to GitHub with open-source license (MIT/Apache 2.0)
+ Announce on relevant forums (r/RealEstate, local Rossmoor groups)
+ Set up community support channels (Discord/GitHub Discussions)
+
+Total Timeline: ~18 weeks (4.5 months)
+Resource Requirements:
+
+1 full-time developer (Rust + Tauri + Flutter experience)
+0.25 FTE designer (UI mockups and iconography)
+Community testers (volunteer basis)
+
+
+Conclusion
+This systems analysis presents a comprehensive blueprint for a decentralized, cross-platform housing inventory tracker focused on Rossmoor, CA. The architecture leverages modern technologies (Tauri, Flutter, IPFS) to deliver a zero-cost, privacy-respecting solution for real-time market intelligence.
+Key Strengths:
+
+Complete independence from paid services
+Resilient P2P architecture
+Cross-platform native performance
+Extensible design for future enhancements
+
+Key Challenges:
+
+Web scraping reliability
+IPFS complexity for non-technical users
+Ongoing maintenance commitment
+
+Success Metrics (12 months post-launch):
+
+100+ active users across all platforms
+99% uptime for data updates
+<5 critical bugs reported
+10+ community contributions
+
+This project exemplifies how modern decentralized technologies can democratize access to valuable market data, empowering individuals to make informed housing decisions without dependence on proprietary platforms.
