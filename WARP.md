@@ -1,3 +1,281 @@
+# WARP.md
+
+This file provides guidance to WARP (warp.dev) when working with code in this repository.
+
+## Common Development Commands
+
+### Building
+```bash
+# Debug build (faster compilation, slower runtime)
+cargo build
+
+# Release build (optimized for size and speed)
+cargo build --release
+
+# Run directly without explicit build step
+RUST_LOG=info cargo run
+
+# Run with debug-level logging
+RUST_LOG=debug cargo run
+```
+
+### Testing
+```bash
+# Run all tests
+cargo test
+
+# Run tests with output visible (useful for debugging)
+cargo test -- --nocapture
+
+# Run a specific test function
+cargo test test_storage_initialization
+
+# Run tests in a specific module
+cargo test core::storage
+
+# Run tests with debug logging
+RUST_LOG=debug cargo test -- --nocapture
+```
+
+### Code Quality
+```bash
+# Check code without building (fast)
+cargo check
+
+# Format code
+cargo fmt
+
+# Check formatting without modifying files
+cargo fmt -- --check
+
+# Run linter (clippy) - install with: rustup component add clippy
+cargo clippy -- -D warnings
+
+# Update dependencies
+cargo update
+```
+
+### Database Management
+```bash
+# Database location varies by platform:
+# Linux: ~/.local/share/re_tracker/housing_data.db
+# Windows: %USERPROFILE%\.local\share\re_tracker\housing_data.db
+# macOS: ~/.local/share/re_tracker/housing_data.db
+
+# View database with sqlite3
+sqlite3 ~/.local/share/re_tracker/housing_data.db
+
+# Example queries:
+# SELECT COUNT(*) FROM housing_data;
+# SELECT * FROM housing_data ORDER BY date DESC LIMIT 10;
+# .schema housing_data
+```
+
+## Project Overview
+
+**Current Phase**: Phase 0 (Proof of Concept) - Core data storage and processing are implemented.
+
+A cross-platform housing inventory tracking application for ZIP code 90720 (Rossmoor, CA). The application will visualize real-time and historical housing market data through interactive charts, with IPFS-based decentralized P2P synchronization.
+
+**Key Innovation**: Decentralized data distribution via IPFS with peer-to-peer synchronization.
+
+**Target Platforms**: Linux (Fedora), Windows, macOS, Android (Flutter in Phase 3)
+
+### Core Value Proposition
+- Zero-cost operation (no paid APIs, hosting, or services)
+- Privacy-respecting architecture (no telemetry)
+- Offline-first with local SQLite storage
+- Transparent, open-source housing market intelligence
+
+## Architecture
+
+### Module Organization
+
+The codebase follows a layered architecture with clear separation of concerns:
+
+```
+src/
+├── core/                      # Core business logic layer
+│   ├── models.rs             # Data structures and types
+│   ├── storage.rs            # SQLite database wrapper
+│   ├── data_processor.rs     # SMA calculations, statistics
+│   └── mod.rs                # Module exports
+├── utils/                     # Utility functions (to be implemented)
+└── main.rs                    # Application entry point
+```
+
+### Core Module Responsibilities
+
+**models.rs** - Defines all data structures:
+- `HousingData`: Primary data point (date, listings, price/sqft, source)
+- `DataSource`: Enum tracking origin (Historical, Scraped, P2P)
+- `AppConfig`: Application configuration with defaults
+- `ScrapedData`: Result of scraping operations
+- `SmaConfig`: Configuration for Simple Moving Averages
+- `MarketSummary`: Statistical summary of market data
+
+**storage.rs** - Database abstraction layer:
+- `Storage::new()`: Initialize DB connection and schema
+- `upsert_housing_data()`: Insert/update single data point
+- `bulk_insert()`: Transaction-based batch inserts
+- `get_data_range()`: Query by date range
+- `get_latest_data()`: Retrieve most recent point
+- `count_data_points()`: Count total records
+- Schema: Indexed on `date` and `last_updated`
+
+**data_processor.rs** - Data transformation and analytics:
+- `calculate_sma()`: Simple Moving Average for price/sqft
+- `calculate_listings_sma()`: SMA for listing counts
+- `generate_market_summary()`: Statistical analysis (avg, min, max, % change)
+- `interpolate_missing_data()`: Linear interpolation for gaps
+- `remove_outliers()`: 3-sigma outlier detection and removal
+
+### Data Flow (Current Implementation)
+
+1. Application starts → initializes logger
+2. `main.rs` determines database path (platform-specific)
+3. `Storage::new()` creates/opens SQLite DB and schema
+4. Sample data inserted if DB is empty (demonstration)
+5. Application displays current data statistics
+
+### Data Flow (Future Phases)
+
+Phase 1 will add:
+- **Data Fetcher**: Download Zillow Research CSVs → parse → bulk insert
+- **Web Scraper**: Scrape Zillow/Redfin → extract metrics → upsert
+- **Scheduler**: Cron-like task runner (12-hour intervals)
+- **Chart Renderer**: Chart.js frontend → query data → render
+- **System Tray**: Desktop integration
+
+Phase 2 will add:
+- **P2P Sync**: rust-libp2p → pub/sub on `/rossmoor-housing/data-updates`
+- **Conflict Resolution**: Last-write-wins based on timestamp
+
+## Technology Stack
+
+### Core Dependencies
+- **rusqlite** (0.30): SQLite with bundled engine
+- **chrono** (0.4): Date/time handling with serde
+- **serde/serde_json** (1.0): Serialization for IPC and P2P
+- **anyhow/thiserror** (1.0): Error handling
+- **log/env_logger** (0.11): Logging infrastructure
+- **tokio** (1.35): Async runtime (for future IPFS integration)
+
+### Future Dependencies
+- **reqwest** (0.11): HTTP client for scraping and CSV downloads
+- **scraper** (0.18): HTML parsing with CSS selectors
+- **csv** (1.3): Zillow Research data parsing
+- **libp2p** (future): P2P networking for IPFS
+
+### Development Dependencies
+- **mockito** (1.2): HTTP mocking for tests
+- **tempfile** (3.8): Temporary files for DB tests
+
+## Key Design Patterns
+
+### Error Handling
+- Use `anyhow::Result<T>` for application-level errors
+- Use `thiserror` for custom error types (when needed)
+- All database operations return `Result` with context
+- Use `.context()` to add human-readable error messages
+
+### Logging
+- Initialize with `env_logger::init()` in main
+- Control verbosity via `RUST_LOG` environment variable
+- Use `info!()` for user-visible events
+- Use `debug!()` for development/troubleshooting
+- Never log sensitive data
+
+### Database Patterns
+- Use `INSERT OR REPLACE` for upserts (idempotent)
+- Batch inserts wrapped in transactions for performance
+- All queries use parameterized statements (SQL injection safe)
+- Indexes on frequently queried columns (date, last_updated)
+- Store dates as ISO 8601 strings (YYYY-MM-DD)
+
+### Testing Patterns
+- Unit tests in same file as implementation (`#[cfg(test)] mod tests`)
+- Use `tempfile::NamedTempFile` for isolated DB tests
+- Helper functions (e.g., `create_test_data()`) for test fixtures
+- Test edge cases: empty data, insufficient data, outliers
+
+## Development Workflow
+
+### Adding New Data Processing Functions
+
+1. Define function signature in `src/core/data_processor.rs`
+2. Implement with proper logging (debug for details, info for summaries)
+3. Add unit tests in same file under `#[cfg(test)] mod tests`
+4. Export via `src/core/mod.rs` if needed by other modules
+5. Run `cargo test` and `cargo clippy`
+
+### Adding New Database Operations
+
+1. Add method to `Storage` struct in `src/core/storage.rs`
+2. Use parameterized queries with `rusqlite::params!`
+3. Add context to all `Result` returns
+4. Write test with temp database
+5. Consider if an index is needed for performance
+
+### Modifying Data Models
+
+1. Update struct in `src/core/models.rs`
+2. Update database schema in `Storage::initialize_schema()` if persisted
+3. Add migration logic if schema changes (future: use `refinery` crate)
+4. Update serialization tests
+5. Update all dependent code
+
+## Project Roadmap Context
+
+**Phase 0 (Complete)**: Core data models, storage, processing
+**Phase 1 (Next)**: Data fetching, scraping, Chart.js UI, system tray
+**Phase 2**: IPFS/libp2p integration, P2P sync
+**Phase 3**: Flutter mobile app
+**Phase 4**: Launch and distribution
+
+When implementing Phase 1 features, place:
+- Data fetcher: `src/core/data_fetcher.rs`
+- Web scraper: `src/utils/scraper.rs`
+- Scheduler: `src/utils/scheduler.rs`
+- Frontend: `frontend/` directory (HTML/CSS/JS)
+
+## Data Sources
+
+### Historical Data
+- **Source**: Zillow Research (https://www.zillow.com/research/data/)
+- **Format**: CSV files with median home values and listing prices
+- **Update Frequency**: Monthly (around 16th-20th)
+- **Access**: Direct HTTPS download
+
+### Real-Time Data (Phase 1)
+- **Sources**: Zillow and Redfin public listing pages
+- **Metrics**: Active listings count, average price per square foot
+- **Update Frequency**: Every 12 hours (12 AM and 12 PM local time)
+- **Method**: Ethical web scraping with rate limiting (max 1 req/min)
+- **Important**: Respect robots.txt, use appropriate User-Agent
+
+## Security and Privacy
+
+- **HTTPS only** for all network requests
+- **No telemetry** or user tracking
+- **Local storage** only (no cloud dependencies)
+- **Rate limiting** for ethical scraping
+- **Input validation** for all external data
+- **P2P message verification** (Phase 2: signature verification)
+
+## Performance Targets
+
+- **Desktop**: <3s cold start, <500ms chart render, <100MB RAM
+- **Database**: Bulk inserts >1000 records/sec
+- **SMA Calculation**: <50ms for 365 days of data
+- **Network**: <30s scraping timeout, 12-hour update intervals
+
+## GitHub Repository
+https://github.com/urmt/RE_TRACKER_by_ZIP
+
+## License
+MIT or Apache 2.0 (dual-licensed)
+
 # RE_TRACKER_by_ZIP - Rossmoor Housing Inventory Tracker
 
 ## Project Overview

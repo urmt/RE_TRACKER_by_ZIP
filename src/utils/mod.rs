@@ -1,8 +1,5 @@
-//! Utility modules for the RE Tracker application
-//! 
-//! This module will contain helper functions and utilities.
-//! Scraper and scheduler implementations will be added in Phase 1.
+/// Utility modules for the RE Tracker application
+/// 
+/// This module contains helper functions and utilities.
 
-// Future modules:
-// pub mod scraper;    // To be implemented in Phase 1
-// pub mod scheduler;  // To be implemented in Phase 1
+pub mod scraper;

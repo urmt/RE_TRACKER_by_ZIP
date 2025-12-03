@@ -6,6 +6,7 @@
 pub mod models;
 pub mod storage;
 pub mod data_processor;
+pub mod data_fetcher;
 
 // Re-export commonly used types for convenience
 pub use models::{HousingData, DataSource, AppConfig, ScrapedData, SmaConfig, MarketSummary};

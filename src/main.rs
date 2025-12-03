@@ -1,20 +1,53 @@
 /// RE_TRACKER_by_ZIP - Rossmoor Housing Inventory Tracker
 /// 
 /// Main entry point for the application.
-/// This is a Phase 0 proof of concept that will be expanded in future phases.
+/// Phase 1: Desktop MVP with data fetching, scraping, and visualization.
 
 mod core;
 mod utils;
 
 use anyhow::Result;
 use chrono::Utc;
+use clap::{Parser, Subcommand};
 use core::{AppConfig, DataSource, HousingData, Storage};
-use log::{info, error};
+use core::data_fetcher::{ZillowConfig, fetch_zillow_data};
+use log::{info, error, warn};
 use std::env;
+use std::fs;
+use std::path::PathBuf;
+use tiny_http::{Server, Response};
+use utils::scraper::{ScraperConfig, scrape_zillow};
+
+/// CLI arguments structure
+#[derive(Parser)]
+#[command(name = "re_tracker")]
+#[command(about = "Rossmoor Housing Market Tracker", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Fetch historical data from Zillow Research
+    Fetch,
+    
+    /// Scrape real-time listing data
+    Scrape,
+    
+    /// Start web server to view charts
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value = "8080")]
+        port: u16,
+    },
+    
+    /// Show current database statistics
+    Stats,
+}
 
 fn main() -> Result<()> {
     // Initialize the logger
-    // Set RUST_LOG=debug for verbose output, or RUST_LOG=info for normal output
     env_logger::init();
     
     info!("========================================");
@@ -22,30 +55,176 @@ fn main() -> Result<()> {
     info!("Rossmoor Housing Inventory Tracker");
     info!("========================================");
     
-    // Load configuration (using defaults for now)
-    let config = AppConfig::default();
-    info!("Tracking ZIP code: {}", config.zip_code);
-    info!("Update interval: {} hours", config.update_interval_hours);
+    let cli = Cli::parse();
     
-    // Initialize database
+    match cli.command {
+        Commands::Fetch => fetch_data()?,
+        Commands::Scrape => scrape_data()?,
+        Commands::Serve { port } => serve_frontend(port)?,
+        Commands::Stats => show_stats()?,
+    }
+    
+    Ok(())
+}
+
+/// Fetch historical data from Zillow Research
+fn fetch_data() -> Result<()> {
+    info!("Fetching historical data...");
+    
     let db_path = get_database_path()?;
-    info!("Database location: {:?}", db_path);
+    let mut storage = Storage::new(&db_path)?;
     
-    let mut storage = Storage::new(&db_path)
-        .map_err(|e| {
-            error!("Failed to initialize database: {}", e);
-            e
-        })?;
+    let config = ZillowConfig::default();
+    let data = fetch_zillow_data(&config)?;
     
-    // Check if we have any existing data
-    let data_count = storage.count_data_points()?;
-    info!("Current data points in database: {}", data_count);
+    info!("Fetched {} data points", data.len());
+    storage.bulk_insert(&data)?;
     
-    if data_count == 0 {
-        info!("No data found. Run data fetcher to populate database.");
-        info!("This is a proof of concept - data fetching will be implemented in Phase 1.");
-    } else {
-        // Show the most recent data
+    info!("Successfully stored historical data");
+    Ok(())
+}
+
+/// Scrape real-time listing data
+fn scrape_data() -> Result<()> {
+    info!("Scraping real-time data...");
+    
+    let db_path = get_database_path()?;
+    let mut storage = Storage::new(&db_path)?;
+    
+    let config = ScraperConfig::default();
+    let scraped = scrape_zillow(&config)?;
+    
+    // Convert ScrapedData to HousingData
+    let housing_data = HousingData {
+        date: scraped.timestamp,
+        active_listings: scraped.listings_count,
+        avg_price_per_sqft: scraped.avg_price_per_sqft,
+        data_source: DataSource::Scraped,
+        last_updated: Utc::now(),
+    };
+    
+    storage.upsert_housing_data(&housing_data)?;
+    
+    info!("Successfully stored scraped data");
+    Ok(())
+}
+
+/// Start HTTP server to serve the frontend
+fn serve_frontend(port: u16) -> Result<()> {
+    info!("Starting web server on http://localhost:{}", port);
+    
+    let server = Server::http(format!("0.0.0.0:{}", port))
+        .map_err(|e| anyhow::anyhow!("Failed to start server: {}", e))?;
+    
+    info!("Server running! Open http://localhost:{} in your browser", port);
+    info!("Press Ctrl+C to stop");
+    
+    for request in server.incoming_requests() {
+        let url = request.url().to_string();
+        info!("Request: {}", url);
+        
+        let response = match url.as_str() {
+            "/" | "/index.html" => {
+                serve_file("frontend/index.html", "text/html")
+            },
+            "/styles.css" => {
+                serve_file("frontend/styles.css", "text/css")
+            },
+            "/chart.js" => {
+                serve_file("frontend/chart.js", "application/javascript")
+            },
+            "/api/data" => {
+                serve_data()
+            },
+            _ => {
+                Response::from_string("404 Not Found")
+                    .with_status_code(404)
+            }
+        };
+        
+        if let Err(e) = request.respond(response) {
+            error!("Failed to send response: {}", e);
+        }
+    }
+    
+    Ok(())
+}
+
+/// Serve a static file
+fn serve_file(path: &str, content_type: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    match fs::read_to_string(path) {
+        Ok(content) => {
+            Response::from_string(content)
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()
+                )
+        },
+        Err(e) => {
+            error!("Failed to read file {}: {}", path, e);
+            Response::from_string(format!("Error: {}", e))
+                .with_status_code(500)
+        }
+    }
+}
+
+/// Serve housing data as JSON
+fn serve_data() -> Response<std::io::Cursor<Vec<u8>>> {
+    match get_all_data() {
+        Ok(data) => {
+            match serde_json::to_string(&data) {
+                Ok(json) => {
+                    Response::from_string(json)
+                        .with_header(
+                            tiny_http::Header::from_bytes(&b"Content-Type"[..], b"application/json").unwrap()
+                        )
+                },
+                Err(e) => {
+                    error!("Failed to serialize data: {}", e);
+                    Response::from_string(format!("Error: {}", e))
+                        .with_status_code(500)
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to get data: {}", e);
+            Response::from_string(format!("Error: {}", e))
+                .with_status_code(500)
+        }
+    }
+}
+
+/// Get all housing data from database
+fn get_all_data() -> Result<Vec<serde_json::Value>> {
+    let db_path = get_database_path()?;
+    let storage = Storage::new(&db_path)?;
+    
+    // Get all data (last 365 days)
+    let end_date = Utc::now();
+    let start_date = end_date - chrono::Duration::days(365);
+    let data = storage.get_data_range(start_date, end_date)?;
+    
+    // Convert to JSON-friendly format
+    let json_data: Vec<serde_json::Value> = data.iter().map(|d| {
+        serde_json::json!({
+            "date": d.date.format("%Y-%m-%d").to_string(),
+            "active_listings": d.active_listings,
+            "avg_price_per_sqft": d.avg_price_per_sqft,
+            "data_source": format!("{:?}", d.data_source).to_lowercase()
+        })
+    }).collect();
+    
+    Ok(json_data)
+}
+
+/// Show database statistics
+fn show_stats() -> Result<()> {
+    let db_path = get_database_path()?;
+    let storage = Storage::new(&db_path)?;
+    
+    let count = storage.count_data_points()?;
+    info!("Total data points: {}", count);
+    
+    if count > 0 {
         if let Some(latest) = storage.get_latest_data()? {
             info!("Latest data point:");
             info!("  Date: {}", latest.date.format("%Y-%m-%d"));
@@ -55,22 +234,9 @@ fn main() -> Result<()> {
             }
             info!("  Source: {:?}", latest.data_source);
         }
+    } else {
+        warn!("No data in database. Run 're_tracker fetch' to populate.");
     }
-    
-    // Example: Insert some test data for demonstration
-    if data_count == 0 {
-        info!("Inserting sample data for demonstration...");
-        insert_sample_data(&mut storage)?;
-        info!("Sample data inserted successfully!");
-    }
-    
-    info!("========================================");
-    info!("Application initialized successfully!");
-    info!("Next steps:");
-    info!("  1. Implement data fetcher (Phase 1)");
-    info!("  2. Implement web scraper (Phase 1)");
-    info!("  3. Build chart UI (Phase 1)");
-    info!("========================================");
     
     Ok(())
 }
@@ -93,35 +259,3 @@ fn get_database_path() -> Result<std::path::PathBuf> {
     Ok(data_dir.join("housing_data.db"))
 }
 
-/// Insert sample data for demonstration purposes
-/// This will be replaced by real data fetching in Phase 1
-fn insert_sample_data(storage: &mut Storage) -> Result<()> {
-    use chrono::Duration;
-    
-    let now = Utc::now();
-    let mut sample_data = Vec::new();
-    
-    // Generate 30 days of sample data
-    for i in 0..30 {
-        let date = now - Duration::days(30 - i);
-        
-        // Simulate realistic housing data with some variation
-        let base_listings = 45;
-        let listings_variation = (i % 7) as i32 - 3;
-        
-        let base_price = 425.0;
-        let price_variation = ((i as f64) * 2.5) - 30.0;
-        
-        sample_data.push(HousingData {
-            date,
-            active_listings: base_listings + listings_variation,
-            avg_price_per_sqft: Some(base_price + price_variation),
-            data_source: DataSource::Historical,
-            last_updated: now,
-        });
-    }
-    
-    storage.bulk_insert(&sample_data)?;
-    
-    Ok(())
-}
